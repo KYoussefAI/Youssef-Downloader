@@ -1,0 +1,4 @@
+customtkinter
+yt-dlp>=2026.08.19
+Pillow
+requests
