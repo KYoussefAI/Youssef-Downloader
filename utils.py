@@ -144,7 +144,9 @@ def format_upload_date(upload_date: str | None) -> str:
 
     try:
         parsed = datetime.strptime(str(upload_date), "%Y%m%d")
-        return parsed.strftime("%B %d, %Y")
+        mois = ("", "janv.", "févr.", "mars", "avr.", "mai", "juin",
+                "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+        return f"{parsed.day} {mois[parsed.month]} {parsed.year}"
     except ValueError:
         return str(upload_date)
 
