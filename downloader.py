@@ -99,7 +99,7 @@ class YouTubeDownloader:
         except json.JSONDecodeError as exc: self._fail(f"Invalid metadata JSON: {exc}\n{raw}",url,"analysis")
         info=self._parse_info(data); self._current_info=info; return info
     def download(self,url: str,output_dir: Path,fmt: DownloadFormat,progress_callback: ProgressCallback|None=None) -> str:
-        if self._cancel_requested: raise RuntimeError("Download cancelled.")
+        if getattr(self,"_cancel_requested",False): raise RuntimeError("Download cancelled.")
         valid, reason = utils.validate_url(url)
         if not valid: raise ValueError(reason)
         url=utils.normalize_url(url); output_dir=Path(output_dir); output_dir.mkdir(parents=True,exist_ok=True)
