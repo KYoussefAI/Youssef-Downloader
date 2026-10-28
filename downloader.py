@@ -98,7 +98,7 @@ class YouTubeDownloader:
         try: data=json.loads(raw)
         except json.JSONDecodeError as exc: self._fail(f"Invalid metadata JSON: {exc}\n{raw}",url,"analysis")
         info=self._parse_info(data); self._current_info=info; return info
-    def download(self,url: str,output_dir: Path,fmt: DownloadFormat,progress_callback: ProgressCallback|None=None) -> str:
+    def download(self,url: str,output_dir: Path,fmt: DownloadFormat,progress_callback: ProgressCallback|None=None, quality: int|None=None) -> str:
         if getattr(self,"_cancel_requested",False): raise RuntimeError("Download cancelled.")
         valid, reason = utils.validate_url(url)
         if not valid: raise ValueError(reason)
@@ -111,7 +111,20 @@ class YouTubeDownloader:
             "--progress-template",f"download:{PROGRESS}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s",
             "--progress-template",f"postprocess:{POST}%(progress.status)s",
             "--print",f"after_move:{FINAL}%(filepath)s"]
-        cmd += (["--format",config.MP4_FORMAT,"--merge-output-format","mp4"] if fmt==DownloadFormat.MP4 else ["--format",config.MP3_FORMAT,"--extract-audio","--audio-format","mp3","--audio-quality",config.MP3_BITRATE+"K"]); cmd.append(url)
+        if fmt == DownloadFormat.MP4:
+            if quality is not None:
+                if not 144 <= quality <= 4320:
+                    raise ValueError("Qualité vidéo invalide.")
+                limit = f"[height<={quality}]"
+                selector = (f"bestvideo{limit}[ext=mp4]+bestaudio[ext=m4a]/"
+                            f"bestvideo{limit}+bestaudio/best{limit}")
+            else:
+                selector = config.MP4_FORMAT
+            cmd += ["--format", selector, "--merge-output-format", "mp4"]
+        else:
+            cmd += ["--format", config.MP3_FORMAT, "--extract-audio",
+                    "--audio-format", "mp3", "--audio-quality", config.MP3_BITRATE+"K"]
+        cmd.append(url)
         self.log.info("download video=%s format=%s yt-dlp=%s",self._video_id(url),fmt.value,self.runtime.version())
         return self._download_process(cmd,url,output_dir,fmt,progress_callback)
 
