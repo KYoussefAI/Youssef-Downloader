@@ -28,7 +28,7 @@ def main() -> None:
         assert app.audio_frame.cget("state") == "normal", "MP3 card not clickable"
 
         # Native full rectangle button invokes same handler as an actual user click.
-        app.audio_frame._clicked()
+        app.audio_frame.cget("command")()
         assert app.format_var.get() == "mp3", "MP3 selection did not register"
         assert app._mode == "idle", "MP3 selection did not rearm completed download"
         assert app.download_btn.cget("state") == "normal", "Download button still disabled after MP3 selection"
@@ -36,7 +36,7 @@ def main() -> None:
         with TemporaryDirectory() as tmp, \
              mock.patch("gui_v3.utils.ensure_downloads_dir", return_value=Path(tmp)), \
              mock.patch("gui_v3.threading.Thread") as thread:
-            app.download_btn._clicked()
+            app.download_btn.cget("command")()
             assert app._mode == "downloading", "Download button click did not launch download"
             assert thread.call_count == 1, "A download thread was not created"
             target = thread.call_args.kwargs["target"]
