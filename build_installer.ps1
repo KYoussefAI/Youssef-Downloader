@@ -18,10 +18,10 @@ try {
     }
 
     $required = @(
-        'assets\icon.ico', 'assets\logo.png',
+        'assets\issa.ico', 'assets\issa-logo.png',
         'ffmpeg\bin\ffmpeg.exe', 'ffmpeg\bin\ffprobe.exe',
         'runtime\yt-dlp.exe', 'runtime\SHA2-256SUMS', 'runtime\deno.exe', 'runtime\deno.exe.sha256sum', 'runtime\DENO_LICENSE.md',
-        'YoussefDownloader.spec', 'installer\YoussefDownloader.iss'
+        'ISSA.spec', 'installer\ISSA.iss'
     )
     foreach ($item in $required) {
         if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot $item) -PathType Leaf)) {
@@ -38,6 +38,8 @@ try {
     $denoActual = (Get-FileHash -Algorithm SHA256 -LiteralPath 'runtime\deno.exe').Hash.ToLowerInvariant()
     if ($denoExpected -ne $denoActual) { throw 'runtime\deno.exe failed its official SHA-256 verification.' }
 
+    & python tools\generate_brand.py
+    if ($LASTEXITCODE -ne 0) { throw 'Brand generation failed.' }
     & python -m pip install --disable-pip-version-check -r requirements-build.txt
     if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
 
@@ -46,19 +48,19 @@ try {
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
     }
 
-    & python -m PyInstaller --noconfirm --clean --workpath build-release --distpath dist-app YoussefDownloader.spec
+    & python -m PyInstaller --noconfirm --clean --workpath build-release --distpath dist-app ISSA.spec
     if ($LASTEXITCODE -ne 0) { throw 'PyInstaller build failed.' }
 
-    $appRoot = Join-Path $ProjectRoot 'dist-app\YoussefDownloader'
+    $appRoot = Join-Path $ProjectRoot 'dist-app\ISSA'
     $packagedFiles = @(
-        'YoussefDownloader.exe',
+        'ISSA.exe',
         '_internal\ffmpeg\bin\ffmpeg.exe',
         '_internal\ffmpeg\bin\ffprobe.exe',
         '_internal\runtime\yt-dlp.exe',
         '_internal\runtime\deno.exe',
         '_internal\runtime\DENO_LICENSE.md',
-        '_internal\assets\icon.ico',
-        '_internal\assets\logo.png'
+        '_internal\assets\issa.ico',
+        '_internal\assets\issa-logo.png'
     )
     foreach ($item in $packagedFiles) {
         if (-not (Test-Path -LiteralPath (Join-Path $appRoot $item) -PathType Leaf)) {
@@ -79,9 +81,9 @@ try {
         throw 'Inno Setup 6 is required. Install it from https://jrsoftware.org/isdl.php and rerun this command.'
     }
 
-    & $iscc "/DMyAppVersion=$version" "/DMyAppPublisher=$publisher" 'installer\YoussefDownloader.iss'
+    & $iscc "/DMyAppVersion=$version" "/DMyAppPublisher=$publisher" 'installer\ISSA.iss'
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
-    $installer = Join-Path $ProjectRoot 'dist-installer\YoussefDownloader-Setup.exe'
+    $installer = Join-Path $ProjectRoot 'dist-installer\ISSA-Setup.exe'
     if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Installer output was not created.' }
 
     Write-Host "Build complete: $installer" -ForegroundColor Green
