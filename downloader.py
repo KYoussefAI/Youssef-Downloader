@@ -146,7 +146,7 @@ class YouTubeDownloader:
                     out.append(line)
             rc=process.wait()
         finally:
-            if process.stdout: process.stdout.close()
+            if process.stdout and hasattr(process.stdout, 'close'): process.stdout.close()
             if process.poll() is None:
                 process.terminate()
                 try: process.wait(timeout=5)
