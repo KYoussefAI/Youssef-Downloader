@@ -7,6 +7,7 @@ clipboard access, and FFmpeg availability checks.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog
+from urllib.parse import parse_qs, urlsplit
 
 import config
 
@@ -23,34 +25,51 @@ import config
 # ---------------------------------------------------------------------------
 
 
-def validate_url(url: str) -> tuple[bool, str]:
-    """
-    Validate whether the given string looks like a supported YouTube URL.
-
-    Returns:
-        A tuple of (is_valid, message). When valid, message is empty.
-    """
-    cleaned = url.strip()
-    if not cleaned:
-        return False, "Please enter a YouTube URL."
-
-    for pattern in config.YOUTUBE_URL_PATTERNS:
-        if re.search(pattern, cleaned, re.IGNORECASE):
-            return True, ""
-
-    return (
-        False,
-        "Invalid YouTube URL. Supported formats include "
-        "youtube.com/watch?v=..., youtu.be/..., and youtube.com/shorts/...",
-    )
+_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_SHORT_HOSTS = {"youtu.be", "www.youtu.be"}
+_EMBED_HOSTS = {"youtube-nocookie.com", "www.youtube-nocookie.com"}
 
 
 def normalize_url(url: str) -> str:
-    """Strip whitespace and ensure the URL has an explicit scheme."""
+    """Normalize a scheme-less URL, without making untrusted hosts acceptable."""
     cleaned = url.strip()
-    if cleaned and not cleaned.startswith(("http://", "https://")):
-        cleaned = f"https://{cleaned}"
+    if cleaned.startswith("//"):
+        return "https:" + cleaned
+    if "://" not in cleaned:
+        return "https://" + cleaned
     return cleaned
+
+
+def validate_url(url: str) -> tuple[bool, str]:
+    """Accept only video URLs on exact official YouTube hostnames."""
+    if not url or not url.strip():
+        return False, "Collez un lien YouTube pour continuer."
+    try:
+        parsed = urlsplit(normalize_url(url))
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
+            raise ValueError("Unsafe scheme or credentials")
+        if parsed.port not in {None, 80, 443}:
+            raise ValueError("Unexpected port")
+        path = parsed.path.strip("/")
+        parts = path.split("/")
+        if hostname in _SHORT_HOSTS:
+            video_id = parts[0]
+        elif hostname in _YOUTUBE_HOSTS | _EMBED_HOSTS:
+            if hostname in _YOUTUBE_HOSTS and path == "watch":
+                video_id = parse_qs(parsed.query).get("v", [""])[0]
+            elif len(parts) == 2 and parts[0] in {"shorts", "live", "embed", "v"}:
+                video_id = parts[1]
+            else:
+                video_id = ""
+        else:
+            video_id = ""
+        if _VIDEO_ID.fullmatch(video_id):
+            return True, ""
+    except (ValueError, TypeError):
+        pass
+    return False, "Lien YouTube non valide. Formats acceptés : /watch, /shorts, /live et youtu.be."
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +144,9 @@ def format_upload_date(upload_date: str | None) -> str:
 
     try:
         parsed = datetime.strptime(str(upload_date), "%Y%m%d")
-        return parsed.strftime("%B %d, %Y")
+        mois = ("", "janv.", "févr.", "mars", "avr.", "mai", "juin",
+                "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+        return f"{parsed.day} {mois[parsed.month]} {parsed.year}"
     except ValueError:
         return str(upload_date)
 
@@ -226,10 +247,10 @@ def check_ffmpeg() -> tuple[bool, str]:
     if missing:
         return (
             False,
-            "FFmpeg binaries missing from bundled resources.\n\n"
+            "Composants FFmpeg introuvables.\n\n"
             f"Missing: {', '.join(missing)}\n"
             f"Expected location: {config.FFMPEG_DIR}\n\n"
-            "Ensure ffmpeg.exe and ffprobe.exe are properly bundled.",
+            "Réinstallez la version complète de l’application (FFmpeg et ffprobe inclus).",
         )
 
     return True, ""
@@ -238,6 +259,56 @@ def check_ffmpeg() -> tuple[bool, str]:
 def get_ffmpeg_location() -> str:
     """Return the directory containing bundled ffmpeg binaries."""
     return str(config.FFMPEG_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Settings (per-user, never saved in the installed program folder)
+# ---------------------------------------------------------------------------
+
+SETTINGS_FILE = config.USER_DATA_DIR / "settings.json"
+
+
+def load_settings() -> dict:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "format": data["format"] if data.get("format") in {"mp4", "mp3"} else "mp4",
+            "download_dir": data["download_dir"] if isinstance(data.get("download_dir"), str) else "",
+        }
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
+def save_settings(download_dir: str, fmt: str) -> None:
+    """Write preferences atomically so abrupt shutdown cannot truncate them."""
+    if fmt not in {"mp4", "mp3"}:
+        raise ValueError("Unsupported output format")
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp = SETTINGS_FILE.with_suffix(".tmp")
+    try:
+        temp.write_text(json.dumps({"download_dir":download_dir, "format":fmt}, ensure_ascii=False), encoding="utf-8")
+        temp.replace(SETTINGS_FILE)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def open_file(file_path: str | Path) -> tuple[bool, str]:
+    path = Path(file_path)
+    if not path.is_file():
+        return False, "The downloaded file is no longer available."
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=True)
+        else:
+            subprocess.run(["xdg-open", str(path)], check=True)
+        return True, ""
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return False, f"Could not open the file: {exc}"
 
 
 # ---------------------------------------------------------------------------
@@ -274,33 +345,33 @@ def classify_error(error: Exception | str) -> tuple[str, str]:
     message = original.lower()
 
     if "private video" in message or "members-only" in message:
-        return "private", "This video is private or members-only."
+        return "private", "Cette vidéo est privée ou réservée aux membres."
     if "age" in message and "restrict" in message:
-        return "age_restricted", "This video is age-restricted and requires authentication."
+        return "age_restricted", "Cette vidéo nécessite une connexion et une vérification de l’âge."
     if "video unavailable" in message or "not available" in message:
-        return "unavailable", "This video is unavailable, removed, or region-blocked."
+        return "unavailable", "Vidéo indisponible, supprimée ou bloquée dans votre région."
     if "confirm you’re not a bot" in message or "confirm you're not a bot" in message or "bot verification" in message:
-        return "bot_verification", "YouTube requested bot verification. Update the downloader; authentication may be required."
+        return "bot_verification", "YouTube demande une vérification. Mettez à jour le moteur ; une connexion peut être nécessaire."
     if "sign in" in message or "login required" in message or "authentication" in message:
-        return "authentication", "YouTube requires sign-in for this video."
+        return "authentication", "Cette vidéo nécessite une connexion à YouTube."
     if "po token" in message or "pot provider" in message or "po_token" in message:
         dependency = " The configured provider also needs its documented JavaScript runtime (current Node.js or Deno)." if any(x in message for x in ("node", "deno", "javascript runtime", "js runtime")) else ""
-        return "po_token", "YouTube requires a PO Token. Install a supported yt-dlp PO Token provider plugin." + dependency
+        return "po_token", "Un jeton PO est requis par YouTube. Installez un fournisseur compatible avec yt-dlp." + dependency
     if "copyright" in message:
-        return "copyright", "This video cannot be downloaded due to copyright restrictions."
+        return "copyright", "Le téléchargement est interdit par les restrictions de droits d’auteur."
     if "ffmpeg" in message or "ffprobe" in message:
         ok, ffmpeg_msg = check_ffmpeg()
         if not ok:
             return "ffmpeg_missing", ffmpeg_msg
-        return "ffmpeg", "FFmpeg failed while merging or converting the download. See the log for details."
+        return "ffmpeg", "Échec de FFmpeg pendant la fusion ou conversion. Consultez le journal."
     if "http error 403" in message or "status code 403" in message or "forbidden" in message:
-        return "http_403", "YouTube rejected the media request (HTTP 403). Update the downloader; a PO Token provider may be required."
+        return "http_403", "YouTube a refusé la requête (HTTP 403). Mettez le moteur à jour."
     if "http error 429" in message or "status code 429" in message or "too many requests" in message:
-        return "http_429", "YouTube is rate-limiting this connection (HTTP 429). Wait before trying again."
+        return "http_429", "Trop de requêtes (HTTP 429). Réessayez plus tard."
     if "fragment" in message and any(x in message for x in ("failed", "unavailable", "error")):
-        return "fragment", "A media fragment failed after retries. Retry later to resume the partial download."
+        return "fragment", "Un fragment du fichier a échoué. Réessayez pour reprendre le téléchargement."
     if any(x in message for x in ("url has expired", "expired url", "signature extraction", "nsig extraction", "extractor error")):
-        return "extraction", "The media URL expired or extraction failed. Update the downloader and retry."
+        return "extraction", "Le lien du média a expiré. Mettez le moteur à jour et réessayez."
     if any(
         token in message
         for token in (
@@ -319,14 +390,14 @@ def classify_error(error: Exception | str) -> tuple[str, str]:
             "and try again."
         )
     if "http error 404" in message or "404" in message:
-        return "not_found", "Video not found. Please verify the URL is correct."
+        return "not_found", "Vidéo introuvable. Vérifiez le lien."
     if "invalid" in message and "url" in message:
-        return "invalid_url", "The URL appears to be invalid."
+        return "invalid_url", "Le lien semble invalide."
 
     # Fall back to the original message, trimmed for readability
     if len(original) > 300:
         original = original[:297] + "..."
-    return "unknown", original or "An unexpected error occurred."
+    return "unknown", original or "Une erreur inattendue s’est produite."
 
 
 def friendly_error_message(error: Exception | str) -> str:

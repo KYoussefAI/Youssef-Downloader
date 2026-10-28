@@ -44,7 +44,7 @@ def _resolve_downloads_dir() -> Path:
     home = Path.home()
     onedrive_desktop = home / "OneDrive" / "Desktop"
     desktop = onedrive_desktop if onedrive_desktop.is_dir() else (home / "Desktop")
-    return desktop / "Youssef Downloader"
+    return desktop / "ISSA Downloader"
 
 
 RESOURCE_DIR: Path = _resolve_resource_dir()
@@ -78,8 +78,8 @@ def _resolve_ffmpeg_dir() -> Path:
 
 FFMPEG_DIR: Path = _resolve_ffmpeg_dir()
 
-LOGO_PATH: Path = ASSETS_DIR / "logo.png"
-ICON_PATH: Path = ASSETS_DIR / "icon.ico"
+LOGO_PATH: Path = ASSETS_DIR / "issa-logo.png"
+ICON_PATH: Path = ASSETS_DIR / "issa.ico"
 FFMPEG_EXE: Path = FFMPEG_DIR / "ffmpeg.exe"
 FFPROBE_EXE: Path = FFMPEG_DIR / "ffprobe.exe"
 
@@ -99,12 +99,12 @@ DENO_EXE: Path = _resolve_deno_exe()
 # Application metadata
 # ---------------------------------------------------------------------------
 
-APP_TITLE: str = "Youssef Downloader"
-APP_VERSION: str = "1.0.0"
-APP_PUBLISHER: str = "Youssef"
-APP_EXECUTABLE: str = "YoussefDownloader.exe"
-APP_DESCRIPTION: str = "YouTube video and audio downloader"
-APP_COPYRIGHT: str = "Copyright (c) 2026 Youssef"
+APP_TITLE: str = "ISSA Downloader"
+APP_VERSION: str = "3.1.0"
+APP_PUBLISHER: str = "ISSA"
+APP_EXECUTABLE: str = "ISSA.exe"
+APP_DESCRIPTION: str = "ISSA — téléchargeur de vidéos MP4 et audios MP3"
+APP_COPYRIGHT: str = "Copyright (c) 2026 ISSA"
 
 
 def _resolve_user_data_dir() -> Path:

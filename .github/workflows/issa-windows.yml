@@ -1,0 +1,33 @@
+name: ISSA Windows EXE
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/issa-v2]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Generate ISSA brand icon
+        run: python tools/generate_brand.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Build portable app
+        run: python -m PyInstaller --noconfirm --clean ISSA.spec
+      - name: Check packaged files
+        shell: pwsh
+        run: |
+          foreach ($item in @('dist/ISSA/ISSA.exe','dist/ISSA/_internal/runtime/yt-dlp.exe','dist/ISSA/_internal/ffmpeg/bin/ffmpeg.exe')) {
+            if (!(Test-Path $item)) { throw "Missing $item" }
+          }
+      - name: Upload Windows application
+        uses: actions/upload-artifact@v4
+        with:
+          name: ISSA-Downloader-Windows
+          path: dist/ISSA/
+          if-no-files-found: error
