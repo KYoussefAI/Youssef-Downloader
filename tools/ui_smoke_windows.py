@@ -23,7 +23,23 @@ def main() -> None:
         app._output = Path("previous.mp4")
         app._mode = "finished"
         app._update_controls()
+        assert app.folder_btn.cget("state") == "normal", "Folder must be active after download"
 
+        # Open parent containing both mp4 and mp3 even when no file has been downloaded.
+        app._mode = "idle"
+        app._output = None
+        app._update_controls()
+        assert app.folder_btn.cget("state") == "normal", "Folder disabled before download"
+        with TemporaryDirectory() as tmp, \
+             mock.patch("gui_v3.utils.ensure_downloads_dir", return_value=Path(tmp)) as ensure, \
+             mock.patch("gui_v3.utils.open_folder", return_value=(True, "")) as opener:
+            app.folder_btn.cget("command")()
+            ensure.assert_called_once()
+            opener.assert_called_once_with(Path(tmp))
+
+        app._output = Path("previous.mp4")
+        app._mode = "finished"
+        app._update_controls()
         assert app.download_btn.cget("state") == "normal", "Download button not enabled at completion"
         assert app.audio_frame.cget("state") == "normal", "MP3 card not clickable"
 
