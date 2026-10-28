@@ -1,5 +1,5 @@
 """
-Youssef Downloader — application entry point.
+ISSA Downloader — application entry point.
 
 Run this module directly or compile it with PyInstaller.
 """
@@ -11,7 +11,7 @@ import sys
 
 def main() -> None:
     """
-    Bootstrap and launch the Youssef Downloader GUI.
+    Bootstrap and launch the ISSA Downloader GUI.
 
     Ensures required directories exist before the window opens.
     """
@@ -19,7 +19,7 @@ def main() -> None:
     import utils
     import config
     from app_logging import get_logger
-    from gui import run_app
+    from gui_v3 import run_app
 
     # Ensure portable folders exist on first launch
     utils.ensure_downloads_dir()
