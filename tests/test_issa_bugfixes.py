@@ -56,7 +56,7 @@ class FormatSwitchTests(unittest.TestCase):
              mock.patch("gui_v3.threading.Thread") as thread:
             ISSADownloaderApp._download(app)
             self.assertEqual(app._mode, "downloading")
-            self.assertIsNone(app._output)
+            self.assertEqual(app._output, Path("previous.mp4"))  # Keep last file accessible
             self.assertEqual(thread.call_count, 1)
             thread.call_args.kwargs["target"]()
             self.assertEqual(app.engine.download.call_count, 1)

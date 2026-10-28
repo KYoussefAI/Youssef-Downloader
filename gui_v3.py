@@ -113,7 +113,7 @@ class ISSADownloaderApp(ctk.CTk):
         except (OSError, ValueError):
             self._label(header, "▶", 27, ACCENT, True).pack(side="left", padx=(0, 12))
         self._label(header, "ISSA Downloader", 26, WHITE, True).pack(side="left")
-        self._label(header, "Vidéo MP4  •  Audio MP3", 12, MUTED).pack(side="right")
+        self._label(header, f"Version {config.APP_VERSION}  •  MP4 / MP3", 12, MUTED).pack(side="right")
 
         url_panel = self._panel(root)
         url_panel.pack(fill="x")
@@ -168,39 +168,37 @@ class ISSADownloaderApp(ctk.CTk):
         formats.pack(fill="x", pady=(0, 11))
         formats.grid_columnconfigure((0, 1), weight=1, uniform="formats")
 
-        self.video_frame = self._panel(formats)
+        # Entire format cards are buttons: no tiny radio circles to aim at.
+        self.video_frame = ctk.CTkButton(
+            formats, text="Vidéo MP4\nQualité au choix",
+            height=92, corner_radius=12, anchor="w",
+            command=lambda: self._select_format("mp4"),
+            fg_color=PANEL_ALT, hover_color="#293453",
+            border_width=2, border_color=ACCENT,
+            font=ctk.CTkFont(family=FONT, size=16, weight="bold"),
+            text_color=WHITE
+        )
         self.video_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 9))
-        video_top = ctk.CTkFrame(self.video_frame, fg_color="transparent")
-        video_top.pack(fill="x", padx=13, pady=(11, 3))
-        self.video_radio = ctk.CTkRadioButton(
-            video_top, text="Vidéo MP4", variable=self.format_var, value="mp4",
-            command=self._on_format, font=ctk.CTkFont(family=FONT,size=16,weight="bold"),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, border_color=MUTED
-        )
-        self.video_radio.pack(side="left")
         self.quality_menu = ctk.CTkOptionMenu(
-            video_top, values=["Meilleure"], variable=self.quality_var,
-            width=125, height=32, fg_color="#202b42",
-            button_color="#303d59", button_hover_color="#415274",
-            font=ctk.CTkFont(family=FONT,size=12)
+            formats, values=["Meilleure"], variable=self.quality_var,
+            command=lambda _value: self._select_format("mp4"),
+            width=132, height=34, corner_radius=8,
+            fg_color="#243149", button_color="#384966",
+            button_hover_color="#4b5d7a",
+            font=ctk.CTkFont(family=FONT, size=12)
         )
-        self.quality_menu.pack(side="right")
-        self._label(self.video_frame, "Qualité au choix", 12, MUTED).pack(
-            anchor="w", padx=43, pady=(0, 10))
+        self.quality_menu.place(relx=0.5, x=-28, rely=0.5, anchor="e")
 
-        self.audio_frame = self._panel(formats)
-        self.audio_frame.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
-        audio_top = ctk.CTkFrame(self.audio_frame, fg_color="transparent")
-        audio_top.pack(fill="x", padx=13, pady=(11, 3))
-        self.audio_radio = ctk.CTkRadioButton(
-            audio_top, text="Audio MP3", variable=self.format_var, value="mp3",
-            command=self._on_format, font=ctk.CTkFont(family=FONT,size=16,weight="bold"),
-            fg_color=ACCENT, hover_color=ACCENT_HOVER, border_color=MUTED
+        self.audio_frame = ctk.CTkButton(
+            formats, text="Audio MP3\nMeilleure qualité audio disponible    •    320 kb/s",
+            height=92, corner_radius=12, anchor="w",
+            command=lambda: self._select_format("mp3"),
+            fg_color=PANEL, hover_color="#293453",
+            border_width=2, border_color=BORDER,
+            font=ctk.CTkFont(family=FONT, size=16, weight="bold"),
+            text_color=WHITE
         )
-        self.audio_radio.pack(side="left")
-        self._label(audio_top, "320 kb/s", 14, MUTED).pack(side="right", padx=3)
-        self._label(self.audio_frame, "Meilleure qualité audio disponible", 12, MUTED).pack(
-            anchor="w", padx=43, pady=(0, 10))
+        self.audio_frame.grid(row=0, column=1, sticky="nsew", padx=(9, 0))
         self._on_format()
 
         progress_panel = self._panel(root)
@@ -235,13 +233,41 @@ class ISSADownloaderApp(ctk.CTk):
         self._label(root, "Enregistrement automatique : Bureau / ISSA Downloader / mp4 ou mp3",
                     11, MUTED).pack(anchor="center", pady=(9, 0))
 
+    def _select_format(self, fmt: str) -> None:
+        """Select by clicking anywhere in the card and prepare another download."""
+        if fmt not in ("mp4", "mp3"):
+            return
+        if self._mode in {"analyzing", "downloading", "cancelling"}:
+            return
+        self.format_var.set(fmt)
+        self._on_format()
+        if self._mode == "finished" and self._info is not None:
+            # Crucial: leaving 'finished' reinstates the enabled Download action.
+            # Keep metadata and the last download folder; reset only progress.
+            self._mode = "idle"
+            self._reset_progress()
+        if self._info is not None:
+            label = "vidéo MP4" if fmt == "mp4" else "audio MP3"
+            self._set_status(f"Format {label} sélectionné — cliquez sur Télécharger.")
+        self._update_controls()
+
     def _on_format(self) -> None:
         video = self.format_var.get() == "mp4"
-        if hasattr(self, "quality_menu"):
-            self.quality_menu.configure(state="normal" if video else "disabled")
         if hasattr(self, "video_frame"):
-            self.video_frame.configure(border_color=ACCENT if video else BORDER)
-            self.audio_frame.configure(border_color=BORDER if video else ACCENT)
+            self.video_frame.configure(
+                fg_color="#23254c" if video else PANEL,
+                border_color=ACCENT if video else BORDER
+            )
+            self.audio_frame.configure(
+                fg_color=PANEL if video else "#23254c",
+                border_color=BORDER if video else ACCENT
+            )
+        if hasattr(self, "quality_menu"):
+            self.quality_menu.configure(
+                state="normal" if video and self._mode not in {
+                    "analyzing", "downloading", "cancelling"
+                } else "disabled"
+            )
 
     def _set_status(self, message: str, error: bool = False) -> None:
         self.status_label.configure(text=message,
@@ -282,11 +308,12 @@ class ISSADownloaderApp(ctk.CTk):
             self.download_btn.configure(text="↓  Télécharger", command=self._download,
                                          state="normal" if valid and not busy else "disabled",
                                          fg_color=ACCENT, hover_color=ACCENT_HOVER)
-        self.folder_btn.configure(state="normal" if self._output and self._mode == "finished"
+        self.folder_btn.configure(state="normal" if self._output and not busy
                                   else "disabled")
-        self.next_btn.configure(state="normal" if self._mode == "finished" else "disabled")
-        self.video_radio.configure(state=active)
-        self.audio_radio.configure(state=active)
+        self.next_btn.configure(state="normal" if self._output and not busy
+                                else "disabled")
+        self.video_frame.configure(state=active)
+        self.audio_frame.configure(state=active)
         self.quality_menu.configure(state="normal" if not busy and self.format_var.get() == "mp4"
                                     else "disabled")
 
@@ -427,7 +454,6 @@ class ISSADownloaderApp(ctk.CTk):
         url = self._analyzed_url
         self.engine.reset_cancel()
         self._mode = "downloading"
-        self._output = None
         self._reset_progress()
         self._set_status("Démarrage du téléchargement...")
         self._update_controls()
@@ -496,7 +522,7 @@ class ISSADownloaderApp(ctk.CTk):
             self._set_status(message, error=True)
 
     def _next(self) -> None:
-        if self._mode != "finished":
+        if self._mode not in {"finished", "idle"} or not self._output:
             return
         self._sequence += 1
         self._mode = "idle"
