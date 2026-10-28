@@ -34,8 +34,10 @@ jobs:
       - name: Smoke test packaged FFmpeg, Deno and yt-dlp
         shell: pwsh
         run: |
-          & .\\dist\\ISSA.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke test failed ($LASTEXITCODE)" }
+          $p = Start-Process -FilePath (Resolve-Path 'dist/ISSA.exe').Path -ArgumentList '--self-test' -Wait -PassThru
+          $log = Join-Path $env:LOCALAPPDATA 'ISSA Downloader/logs/app.log'
+          if (Test-Path $log) { Get-Content $log -Tail 20 }
+          if ($p.ExitCode -ne 0) { throw "Packaged runtime smoke test failed ($($p.ExitCode))" }
       - name: Upload single-file Windows executable
         uses: actions/upload-artifact@v4
         with:
