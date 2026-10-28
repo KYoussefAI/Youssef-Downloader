@@ -100,7 +100,7 @@ DENO_EXE: Path = _resolve_deno_exe()
 # ---------------------------------------------------------------------------
 
 APP_TITLE: str = "ISSA Downloader"
-APP_VERSION: str = "3.2.0"
+APP_VERSION: str = "3.3.0"
 APP_PUBLISHER: str = "ISSA"
 APP_EXECUTABLE: str = "ISSA.exe"
 APP_DESCRIPTION: str = "ISSA — téléchargeur de vidéos MP4 et audios MP3"
