@@ -17,6 +17,9 @@ try {
         throw 'Could not read a valid APP_VERSION from config.py.'
     }
 
+    & python tools\generate_brand.py
+    if ($LASTEXITCODE -ne 0) { throw 'Brand generation failed.' }
+
     $required = @(
         'assets\issa.ico', 'assets\issa-logo.png',
         'ffmpeg\bin\ffmpeg.exe', 'ffmpeg\bin\ffprobe.exe',
@@ -38,8 +41,6 @@ try {
     $denoActual = (Get-FileHash -Algorithm SHA256 -LiteralPath 'runtime\deno.exe').Hash.ToLowerInvariant()
     if ($denoExpected -ne $denoActual) { throw 'runtime\deno.exe failed its official SHA-256 verification.' }
 
-    & python tools\generate_brand.py
-    if ($LASTEXITCODE -ne 0) { throw 'Brand generation failed.' }
     & python -m pip install --disable-pip-version-check -r requirements-build.txt
     if ($LASTEXITCODE -ne 0) { throw 'Build dependency installation failed.' }
 
