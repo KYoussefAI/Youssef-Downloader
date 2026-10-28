@@ -2,9 +2,9 @@ name: ISSA v3 Windows EXE
 on:
   workflow_dispatch:
   push:
-    branches: [feature/issa-v3-french-ui]
+    branches: [feature/issa-v3-2-format-fix]
 concurrency:
-  group: issa-v3-windows
+  group: issa-v3-2-windows
   cancel-in-progress: true
 jobs:
   build:
@@ -41,7 +41,7 @@ jobs:
       - name: Upload single-file Windows executable
         uses: actions/upload-artifact@v4
         with:
-          name: ISSA-v3-1-FR-EXE
+          name: ISSA-v3-2-FR-EXE
           path: dist/ISSA.exe
           compression-level: 6
           if-no-files-found: error
