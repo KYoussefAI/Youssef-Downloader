@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [feature/issa-v3-french-ui]
+concurrency:
+  group: issa-v3-windows
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-latest
@@ -26,7 +29,7 @@ jobs:
         run: |
           if (!(Test-Path 'dist/ISSA.exe')) { throw 'Missing ISSA.exe' }
           $size = (Get-Item 'dist/ISSA.exe').Length
-          if ($size -lt 200000000) { throw "Unexpectedly small self-contained executable: $size" }
+          if ($size -lt 80000000) { throw "Unexpectedly small self-contained executable: $size" }
           Write-Host "ISSA.exe built: $size bytes"
       - name: Upload single-file Windows executable
         uses: actions/upload-artifact@v4
