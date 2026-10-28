@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Sequence
 import config
 
-_LOGGER_NAME = "youssef_downloader"
+_LOGGER_NAME = "issa_downloader"
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(po[_ -]?token(?:=|:|\+))[^\s;,&]+"),
     re.compile(r"(?i)(authorization:\s*)[^\r\n]+"),
