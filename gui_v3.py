@@ -7,6 +7,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 
+from progress_tracking import monotonic_download_percent
 import customtkinter as ctk
 import requests
 from PIL import Image
@@ -247,6 +248,8 @@ class ISSADownloaderApp(ctk.CTk):
                                     text_color=RED if error else WHITE)
 
     def _reset_progress(self) -> None:
+        # A fresh transfer starts at zero. Individual media streams never rewind it.
+        self._visible_progress = 0.0
         self.progress_bar.set(0)
         self.percent_label.configure(text="0%")
         self.bytes_label.configure(text="0 o / —")
@@ -405,7 +408,12 @@ class ISSADownloaderApp(ctk.CTk):
         self.thumb.configure(image=self._thumb_ref, text="")
 
     def _download(self) -> None:
-        if self._mode != "idle" or self._info is None:
+        # After an MP4 completes, the same analyzed video can be downloaded as
+        # MP3 (or another MP4 quality) without pressing Suivant or re-analyzing.
+        if self._mode not in {"idle", "finished"} or self._info is None:
+            return
+        if utils.normalize_url(self.url_entry.get()) != self._analyzed_url:
+            self._set_status("Le lien a changé. Cliquez sur Analyser.", error=True)
             return
         fmt = DownloadFormat(self.format_var.get())
         quality_str = self.quality_var.get()
@@ -437,7 +445,10 @@ class ISSADownloaderApp(ctk.CTk):
     def _download_progress(self, data: dict) -> None:
         if self._mode not in {"downloading", "cancelling"}:
             return
-        percent = max(0., min(100., float(data.get("percent") or 0)))
+        percent = monotonic_download_percent(
+            self._visible_progress, data.get("percent"), data.get("status")
+        )
+        self._visible_progress = percent
         self.progress_bar.set(percent / 100)
         self.percent_label.configure(text=f"{percent:.0f}%")
         downloaded = data.get("downloaded_bytes")
@@ -471,6 +482,7 @@ class ISSADownloaderApp(ctk.CTk):
         else:
             self._output = Path(output)
             self._mode = "finished"
+            self._visible_progress = 100.0
             self.progress_bar.set(1)
             self.percent_label.configure(text="100%")
             self._set_status("Téléchargement terminé ! Ouvrez le dossier ou passez au suivant.")
