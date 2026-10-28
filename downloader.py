@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json, re, shutil, subprocess, sys, threading, time
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -87,19 +88,24 @@ class YouTubeDownloader:
 
     @staticmethod
     def _common():
-        args = ["--no-playlist","--no-check-certificates","--no-config","--encoding","utf-8"]
+        args = ["--no-playlist","--no-config","--encoding","utf-8"]
         if config.DENO_EXE.is_file(): args += ["--js-runtimes",f"deno:{config.DENO_EXE}"]
         return args
     def extract_info(self,url: str) -> VideoInfo:
+        valid, reason = utils.validate_url(url)
+        if not valid: raise ValueError(reason)
         url=utils.normalize_url(url); raw=self._capture(self.runtime.command()+self._common()+["--dump-single-json","--skip-download",url],url,"analysis")
         try: data=json.loads(raw)
         except json.JSONDecodeError as exc: self._fail(f"Invalid metadata JSON: {exc}\n{raw}",url,"analysis")
         info=self._parse_info(data); self._current_info=info; return info
     def download(self,url: str,output_dir: Path,fmt: DownloadFormat,progress_callback: ProgressCallback|None=None) -> str:
-        self.reset_cancel(); url=utils.normalize_url(url); output_dir=Path(output_dir); output_dir.mkdir(parents=True,exist_ok=True)
+        if getattr(self,"_cancel_requested",False): raise RuntimeError("Download cancelled.")
+        valid, reason = utils.validate_url(url)
+        if not valid: raise ValueError(reason)
+        url=utils.normalize_url(url); output_dir=Path(output_dir); output_dir.mkdir(parents=True,exist_ok=True)
         ok,msg=utils.check_ffmpeg()
         if not ok: self.log.error("category=ffmpeg_missing %s",sanitize(msg)); raise RuntimeError(msg)
-        cmd=self.runtime.command()+self._common()+["--ffmpeg-location",utils.get_ffmpeg_location(),"--output",str(output_dir/"%(title)s.%(ext)s"),
+        cmd=self.runtime.command()+self._common()+["--ffmpeg-location",utils.get_ffmpeg_location(),"--output",str(output_dir/"%(title).180B [%(id)s].%(ext)s"),
             "--retries","10","--fragment-retries","10","--file-access-retries","3","--retry-sleep","http:exp=1:20","--retry-sleep","fragment:exp=1:10",
             "--socket-timeout","20","--concurrent-fragments","4","--continue","--part","--newline","--progress",
             "--progress-template",f"download:{PROGRESS}%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s",
@@ -116,23 +122,43 @@ class YouTubeDownloader:
         if r.stderr.strip(): self.log.info("%s diagnostics video=%s raw=%s",operation,self._video_id(url),sanitize(r.stderr))
         return r.stdout.strip()
     def _download_process(self,cmd,url,output_dir,fmt,callback):
-        out=[]; final=""; started=time.time()
-        self._process=popen_hidden(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding="utf-8",errors="replace",bufsize=1)
-        assert self._process.stdout
-        for line in self._process.stdout:
-            line=line.rstrip("\r\n"); out.append(line)
-            if line.startswith(PROGRESS):
-                self.log.debug("progress event=%s", sanitize(line))
-                if callback: callback(self._progress(line[len(PROGRESS):]))
-            elif line.startswith(POST):
-                if callback: callback({"status":"converting","percent":99.0,"message":"Merging video and audio..." if fmt==DownloadFormat.MP4 else "Converting to MP3..."})
-            elif line.startswith(FINAL):
-                final=line[len(FINAL):]; self.log.info("final filepath event=%s", sanitize(final))
-        rc=self._process.wait(); self.log.info("subprocess exit pid=%s exit_code=%s", self._process.pid, rc)
-        self._process=None; raw="\n".join(out)
-        if self._cancel_requested: self.log.info("cancelled video=%s",self._video_id(url)); raise RuntimeError("Download cancelled.")
+        # Keep a bounded diagnostic tail: a long transfer must not use unbounded RAM.
+        out=deque(maxlen=250); final=""; started=time.time()
+        if self._cancel_requested:
+            raise RuntimeError("Download cancelled.")
+        process=popen_hidden(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+                             text=True,encoding="utf-8",errors="replace",bufsize=1)
+        self._process=process
+        try:
+            if self._cancel_requested:
+                self.request_cancel()
+            assert process.stdout is not None
+            for line in process.stdout:
+                line=line.rstrip("\r\n")
+                if line.startswith(PROGRESS):
+                    if callback: callback(self._progress(line[len(PROGRESS):]))
+                elif line.startswith(POST):
+                    if callback: callback({"status":"converting","percent":99.0,
+                                          "message":"Merging video and audio..." if fmt==DownloadFormat.MP4 else "Converting to MP3..."})
+                elif line.startswith(FINAL):
+                    final=line[len(FINAL):]
+                else:
+                    out.append(line)
+            rc=process.wait()
+        finally:
+            if process.stdout and hasattr(process.stdout, 'close'): process.stdout.close()
+            if process.poll() is None:
+                process.terminate()
+                try: process.wait(timeout=5)
+                except subprocess.TimeoutExpired: process.kill(); process.wait()
+            self._process=None
+        raw="\n".join(out)
+        self.log.info("subprocess exit pid=%s exit_code=%s",process.pid,rc)
+        if self._cancel_requested:
+            raise RuntimeError("Download cancelled.")
         if rc: self._fail(raw,url,"download")
-        if not final or not Path(final).is_file(): final=self._fallback_output(Path(output_dir),fmt,started)
+        if not final or not Path(final).is_file():
+            final=self._fallback_output(Path(output_dir),fmt,started)
         if not final: self._fail(raw+"\nProcess exited 0 but final output could not be located",url,"download")
         if callback: callback({"status":"finished","percent":100.0,"message":"Finished","output_path":final})
         return str(Path(final).resolve())
@@ -143,7 +169,7 @@ class YouTubeDownloader:
     def _progress(self,payload):
         p=(payload.split("|")+[""]*6)[:6]
         total=self._num(p[1],int) or self._num(p[2],int)
-        return {"status":"downloading","percent":self._num(p[5]) or 0.0,"downloaded_bytes":self._num(p[0],int),"total_bytes":total,"speed":self._num(p[3]),"eta":self._num(p[4],int),"message":"Downloading..."}
+        return {"status":"downloading","percent":max(0.0,min(100.0,self._num(p[5]) or 0.0)),"downloaded_bytes":self._num(p[0],int),"total_bytes":total,"speed":self._num(p[3]),"eta":self._num(p[4],int),"message":"Downloading..."}
     @staticmethod
     def _fallback_output(output_dir,fmt,started):
         extension=".mp4" if fmt==DownloadFormat.MP4 else ".mp3"

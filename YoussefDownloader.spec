@@ -21,7 +21,7 @@ version_info = VSVersionInfo(
             StringStruct('CompanyName', config.APP_PUBLISHER),
             StringStruct('FileDescription', config.APP_DESCRIPTION),
             StringStruct('FileVersion', config.APP_VERSION),
-            StringStruct('InternalName', 'YoussefDownloader'),
+            StringStruct('InternalName', 'ISSA'),
             StringStruct('LegalCopyright', config.APP_COPYRIGHT),
             StringStruct('OriginalFilename', config.APP_EXECUTABLE),
             StringStruct('ProductName', config.APP_TITLE),
@@ -84,7 +84,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='YoussefDownloader',
+    name='ISSA',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -95,7 +95,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/icon.ico',
+    icon='assets/issa.ico',
     version=version_info,
 )
 
@@ -107,5 +107,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='YoussefDownloader',
+    name='ISSA',
 )

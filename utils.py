@@ -7,6 +7,7 @@ clipboard access, and FFmpeg availability checks.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -14,6 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog
+from urllib.parse import parse_qs, urlsplit
 
 import config
 
@@ -23,34 +25,51 @@ import config
 # ---------------------------------------------------------------------------
 
 
-def validate_url(url: str) -> tuple[bool, str]:
-    """
-    Validate whether the given string looks like a supported YouTube URL.
-
-    Returns:
-        A tuple of (is_valid, message). When valid, message is empty.
-    """
-    cleaned = url.strip()
-    if not cleaned:
-        return False, "Please enter a YouTube URL."
-
-    for pattern in config.YOUTUBE_URL_PATTERNS:
-        if re.search(pattern, cleaned, re.IGNORECASE):
-            return True, ""
-
-    return (
-        False,
-        "Invalid YouTube URL. Supported formats include "
-        "youtube.com/watch?v=..., youtu.be/..., and youtube.com/shorts/...",
-    )
+_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"}
+_SHORT_HOSTS = {"youtu.be", "www.youtu.be"}
+_EMBED_HOSTS = {"youtube-nocookie.com", "www.youtube-nocookie.com"}
 
 
 def normalize_url(url: str) -> str:
-    """Strip whitespace and ensure the URL has an explicit scheme."""
+    """Normalize a scheme-less URL, without making untrusted hosts acceptable."""
     cleaned = url.strip()
-    if cleaned and not cleaned.startswith(("http://", "https://")):
-        cleaned = f"https://{cleaned}"
+    if cleaned.startswith("//"):
+        return "https:" + cleaned
+    if "://" not in cleaned:
+        return "https://" + cleaned
     return cleaned
+
+
+def validate_url(url: str) -> tuple[bool, str]:
+    """Accept only video URLs on exact official YouTube hostnames."""
+    if not url or not url.strip():
+        return False, "Paste a YouTube video link to continue."
+    try:
+        parsed = urlsplit(normalize_url(url))
+        hostname = (parsed.hostname or "").lower()
+        if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
+            raise ValueError("Unsafe scheme or credentials")
+        if parsed.port not in {None, 80, 443}:
+            raise ValueError("Unexpected port")
+        path = parsed.path.strip("/")
+        parts = path.split("/")
+        if hostname in _SHORT_HOSTS:
+            video_id = parts[0]
+        elif hostname in _YOUTUBE_HOSTS | _EMBED_HOSTS:
+            if hostname in _YOUTUBE_HOSTS and path == "watch":
+                video_id = parse_qs(parsed.query).get("v", [""])[0]
+            elif len(parts) == 2 and parts[0] in {"shorts", "live", "embed", "v"}:
+                video_id = parts[1]
+            else:
+                video_id = ""
+        else:
+            video_id = ""
+        if _VIDEO_ID.fullmatch(video_id):
+            return True, ""
+    except (ValueError, TypeError):
+        pass
+    return False, "Use a valid YouTube video link (youtube.com/watch, /shorts, /live, or youtu.be)."
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +257,56 @@ def check_ffmpeg() -> tuple[bool, str]:
 def get_ffmpeg_location() -> str:
     """Return the directory containing bundled ffmpeg binaries."""
     return str(config.FFMPEG_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Settings (per-user, never saved in the installed program folder)
+# ---------------------------------------------------------------------------
+
+SETTINGS_FILE = config.USER_DATA_DIR / "settings.json"
+
+
+def load_settings() -> dict:
+    try:
+        data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {}
+        return {
+            "format": data["format"] if data.get("format") in {"mp4", "mp3"} else "mp4",
+            "download_dir": data["download_dir"] if isinstance(data.get("download_dir"), str) else "",
+        }
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
+def save_settings(download_dir: str, fmt: str) -> None:
+    """Write preferences atomically so abrupt shutdown cannot truncate them."""
+    if fmt not in {"mp4", "mp3"}:
+        raise ValueError("Unsupported output format")
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp = SETTINGS_FILE.with_suffix(".tmp")
+    try:
+        temp.write_text(json.dumps({"download_dir":download_dir, "format":fmt}, ensure_ascii=False), encoding="utf-8")
+        temp.replace(SETTINGS_FILE)
+    finally:
+        if temp.exists():
+            temp.unlink()
+
+
+def open_file(file_path: str | Path) -> tuple[bool, str]:
+    path = Path(file_path)
+    if not path.is_file():
+        return False, "The downloaded file is no longer available."
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(path)], check=True)
+        else:
+            subprocess.run(["xdg-open", str(path)], check=True)
+        return True, ""
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return False, f"Could not open the file: {exc}"
 
 
 # ---------------------------------------------------------------------------

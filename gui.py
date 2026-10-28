@@ -8,6 +8,7 @@ marshalled back to the main thread via ``after()``.
 from __future__ import annotations
 
 import io
+import queue
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -43,10 +44,16 @@ class YouTubeDownloaderApp(ctk.CTk):
         self._busy: bool = False
         self._downloading: bool = False
         self._thumbnail_image: ctk.CTkImage | None = None
+        self._ui_queue = queue.Queue()
+        self._closing = False
+        self._thumbnail_token = 0
+        self._last_download_path = None
+        self._settings = utils.load_settings()
 
         self._configure_window()
         self._build_layout()
         self._set_default_state()
+        self.after(50, self._drain_ui_queue)
         self.after(0, self._start_downloader_version_check)
 
     # ------------------------------------------------------------------
@@ -64,7 +71,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             try:
                 import ctypes
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                    "YoussefDownloader.App.1.0"
+                    "ISSA.Downloader.2"
                 )
             except Exception:
                 pass
@@ -267,7 +274,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, sticky="w", padx=12, pady=(10, 4))
 
-        self.format_var = tk.StringVar(value=DownloadFormat.MP4.value)
+        self.format_var = tk.StringVar(value=self._settings.get("format", "mp4"))
 
         options_frame = ctk.CTkFrame(section, fg_color="transparent")
         options_frame.grid(row=1, column=0, sticky="w", padx=12, pady=(0, 10))
@@ -300,7 +307,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, columnspan=3, sticky="w", padx=12, pady=(10, 4))
 
-        default_dir = str(utils.ensure_downloads_dir())
+        default_dir = self._settings.get("download_dir") or str(utils.ensure_downloads_dir())
         self.location_entry = ctk.CTkEntry(section, height=38)
         self.location_entry.insert(0, default_dir)
         self.location_entry.grid(row=1, column=0, sticky="ew", padx=(12, 8), pady=(0, 10))
@@ -380,6 +387,8 @@ class YouTubeDownloaderApp(ctk.CTk):
             command=self._on_download,
         )
         self.download_btn.grid(row=row, column=0, sticky="ew", pady=(4, 8))
+        self.open_download_btn = ctk.CTkButton(parent, text="Open downloaded file", height=34, state="disabled", command=self._on_open_download)
+        self.open_download_btn.grid(row=row+1, column=0, sticky="ew", pady=(0, 8))
         return row + 1
 
     # ------------------------------------------------------------------
@@ -417,8 +426,23 @@ class YouTubeDownloaderApp(ctk.CTk):
     # ------------------------------------------------------------------
 
     def _run_on_main(self, func, *args, **kwargs) -> None:
-        """Schedule a callable on the Tk main loop."""
-        self.after(0, lambda: func(*args, **kwargs))
+        """Workers only enqueue UI work; Tk APIs are main-thread-only."""
+        if not self._closing:
+            self._ui_queue.put((func, args, kwargs))
+
+    def _drain_ui_queue(self) -> None:
+        if self._closing:
+            return
+        for _ in range(60):
+            try:
+                func, args, kwargs = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                func(*args, **kwargs)
+            except Exception:
+                self._logger.exception("Queued UI callback failed")
+        self.after(50, self._drain_ui_queue)
 
     def _set_status(self, message: str, *, is_error: bool = False) -> None:
         """Update the status label."""
@@ -486,6 +510,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
         self.url_entry.delete(0, tk.END)
         self._analyzed = False
+        self._invalidate_thumbnail()
         self._reset_video_info()
         self._reset_progress()
         self._set_status("Ready — paste a URL and click Analyze.")
@@ -509,6 +534,15 @@ class YouTubeDownloaderApp(ctk.CTk):
         if not ok:
             self._set_status(msg, is_error=True)
 
+    def _on_open_download(self) -> None:
+        if self._last_download_path:
+            ok, message = utils.open_file(self._last_download_path)
+            if not ok:
+                self._set_status(message, is_error=True)
+
+    def _invalidate_thumbnail(self) -> None:
+        self._thumbnail_token += 1
+
     def _on_analyze(self) -> None:
         """Validate URL and fetch metadata on a background thread."""
         if self._busy:
@@ -521,6 +555,7 @@ class YouTubeDownloaderApp(ctk.CTk):
             return
 
         self._analyzed = False
+        self._invalidate_thumbnail()
         self._enable_download(False)
         self._reset_video_info()
         self._reset_progress()
@@ -551,7 +586,15 @@ class YouTubeDownloaderApp(ctk.CTk):
             return
 
         fmt = DownloadFormat(self.format_var.get())
-        format_dir = utils.get_format_output_dir(output_dir, fmt.value)
+        try:
+            format_dir = utils.get_format_output_dir(output_dir, fmt.value)
+            utils.save_settings(output_dir, fmt.value)
+        except OSError as exc:
+            self._set_status(f"Cannot use download folder: {exc}", is_error=True)
+            return
+        self._downloader.reset_cancel()
+        self._last_download_path = None
+        self.open_download_btn.configure(state="disabled")
 
         self._set_busy(True, for_download=True)
         self._reset_progress()
@@ -702,6 +745,8 @@ class YouTubeDownloaderApp(ctk.CTk):
         self._set_busy(False)
         self.progress_bar.set(1.0)
         self.percent_label.configure(text="100%")
+        self._last_download_path = output_path
+        self.open_download_btn.configure(state="normal")
         self._set_status(f"Finished — saved to:\n{output_path}")
 
     def _on_download_error(self, message: str) -> None:
@@ -721,20 +766,31 @@ class YouTubeDownloaderApp(ctk.CTk):
         """Fetch and display the video thumbnail asynchronously."""
         if not url:
             return
+        token = self._thumbnail_token
 
         def worker(thumbnail_url: str) -> None:
             try:
                 response = requests.get(thumbnail_url, timeout=15)
                 response.raise_for_status()
+                if len(response.content) > 5_000_000:
+                    raise ValueError("Thumbnail too large")
                 image = Image.open(io.BytesIO(response.content))
-                self._run_on_main(self._display_thumbnail, image)
+                image.thumbnail((640, 360))
+                self._run_on_main(self._display_thumbnail_if_current, token, image)
             except Exception:
                 self._run_on_main(
-                    self.thumbnail_label.configure,
-                    text="Thumbnail unavailable",
+                    self._thumbnail_failure_if_current, token,
                 )
 
         threading.Thread(target=worker, args=(url,), daemon=True).start()
+
+    def _thumbnail_failure_if_current(self, token: int) -> None:
+        if token == self._thumbnail_token:
+            self.thumbnail_label.configure(text="Thumbnail unavailable")
+
+    def _display_thumbnail_if_current(self, token: int, image: Image.Image) -> None:
+        if token == self._thumbnail_token:
+            self._display_thumbnail(image)
 
     def _display_thumbnail(self, image: Image.Image) -> None:
         """Render a PIL image in the thumbnail label."""
@@ -755,6 +811,7 @@ class YouTubeDownloaderApp(ctk.CTk):
 
     def on_closing(self) -> None:
         """Clean shutdown — request cancellation of active downloads."""
+        self._closing = True
         self._downloader.request_cancel()
         self.destroy()
 
