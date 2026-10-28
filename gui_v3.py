@@ -308,8 +308,8 @@ class ISSADownloaderApp(ctk.CTk):
             self.download_btn.configure(text="↓  Télécharger", command=self._download,
                                          state="normal" if valid and not busy else "disabled",
                                          fg_color=ACCENT, hover_color=ACCENT_HOVER)
-        self.folder_btn.configure(state="normal" if self._output and not busy
-                                  else "disabled")
+        # Always accessible, even before analyzing or during a download.
+        self.folder_btn.configure(state="normal")
         self.next_btn.configure(state="normal" if self._output and not busy
                                 else "disabled")
         self.video_frame.configure(state=active)
@@ -515,11 +515,14 @@ class ISSADownloaderApp(ctk.CTk):
         self._update_controls()
 
     def _open_folder(self) -> None:
-        if not self._output:
-            return
-        ok, message = utils.open_folder(self._output.parent)
+        """Open the common Desktop/ISSA Downloader folder (mp4 and mp3 inside)."""
+        try:
+            folder = utils.ensure_downloads_dir()
+            ok, message = utils.open_folder(folder)
+        except OSError as exc:
+            ok, message = False, str(exc)
         if not ok:
-            self._set_status(message, error=True)
+            self._set_status(f"Impossible d'ouvrir le dossier : {message}", error=True)
 
     def _next(self) -> None:
         if self._mode not in {"finished", "idle"} or not self._output:
